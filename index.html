@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SYCO Aqua Dashboard</title>
+<style>
+:root{--bg:#f3f6f8;--fg:#14212b;--mu:#5d6d78;--card:#fff;--ac:#0a7ea4;--bd:#d5dde3}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1519;--fg:#e6edf1;--mu:#90a1ac;--card:#182026;--ac:#38b6dc;--bd:#2c3a43}}
+*{box-sizing:border-box}body{margin:auto;padding:12px;background:var(--bg);color:var(--fg);font:15px system-ui,sans-serif;max-width:1000px}
+h2{margin:6px 0}h3{margin:0 0 6px;font-size:15px}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin:10px 0}
+button,.btn{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 13px;margin:3px;font-size:14px;cursor:pointer;display:inline-block}
+button.o{background:transparent;color:var(--ac);border:1px solid var(--ac)}button:disabled{opacity:.4;cursor:default}
+button.on{outline:2px solid var(--fg)}
+canvas{width:100%;height:170px;display:block;background:var(--bg);border-radius:6px}
+.g{display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:8px}
+.k{background:var(--bg);border-radius:8px;padding:8px}.k b{display:block;font-size:20px}.k span{color:var(--mu);font-size:12px}
+table{width:100%;border-collapse:collapse}td{padding:5px;border-bottom:1px solid var(--bd)}
+.tab{display:none}.tab.v{display:block}label{font-size:13px;color:var(--mu);margin-right:12px;white-space:nowrap}
+input[type=range]{vertical-align:middle;width:130px}input[type=number]{width:80px}
+.pb{height:6px;background:var(--bd);border-radius:3px;margin-top:4px}.pb i{display:block;height:6px;width:0;background:var(--ac);border-radius:3px}
+.lg{font-size:12px;color:var(--mu)}
+</style></head><body>
+<h2>SYCO Aqua Dashboard</h2>
+<div class="c">
+ <button id="bc">Connect</button><button id="bs" disabled>▶ Start</button><button id="bt" disabled>■ Stop</button>
+ <button id="bd" class="o">Load demo</button><label class="btn o" style="margin:3px">Open .syc file<input id="lf" type="file" accept=".syc" hidden></label>
+ <div id="st" class="lg" style="margin-top:6px">Not connected</div>
+</div>
+<div>
+ <button class="tb on" data-t="t1">Live</button><button class="tb o" data-t="t2">Files</button><button class="tb o" data-t="t3">Analysis</button>
+</div>
+
+<div id="t1" class="tab v">
+ <div class="c"><div class="g">
+  <div class="k"><b id="kRec">–</b><span>Recording</span></div>
+  <div class="k"><b id="kEl">0:00</b><span>Elapsed</span></div>
+  <div class="k"><b id="kR1">–</b><span>EMG1 RMS (live)</span></div>
+  <div class="k"><b id="kR2">–</b><span>EMG2 RMS (live)</span></div>
+  <div class="k"><b id="kGy">–</b><span>Gyro °/s</span></div>
+  <div class="k"><b id="kBat">–</b><span>Battery</span></div>
+  <div class="k"><b id="kDr">–</b><span>Dropped groups</span></div>
+ </div>
+ <button id="bp" class="o">Pause view</button><label>Window <select id="lw"><option value="200">10 s</option><option value="600" selected>30 s</option></select></label></div>
+ <div class="c"><h3>EMG 1 (counts)</h3><canvas id="l1"></canvas></div>
+ <div class="c"><h3>EMG 2 (counts)</h3><canvas id="l2"></canvas></div>
+ <div class="c"><h3>Gyro magnitude (°/s)</h3><canvas id="l3"></canvas></div>
+</div>
+
+<div id="t2" class="tab">
+ <div class="c"><button id="bl" disabled>Refresh list</button><table id="fl"></table><div class="pb"><i id="pg"></i></div></div>
+</div>
+
+<div id="t3" class="tab">
+ <div class="c"><h3>Summary</h3><div class="g" id="sum"><div class="k"><b>–</b><span>Open or download a session</span></div></div></div>
+ <div class="c"><h3>Settings (live re-analysis)</h3>
+  <label>Stroke sensitivity <input id="sSens" type="range" min="0" max="150" value="50"></label>
+  <label>Min stroke gap <input id="sGap" type="range" min="300" max="1500" value="500"><span id="vGap">500 ms</span></label>
+  <label>RMS window <select id="sWin"><option>100</option><option selected>250</option><option>500</option></select> ms</label>
+  <label>Burst threshold <input id="sBur" type="range" min="10" max="80" value="30"><span id="vBur">30%</span> of peak</label><br>
+  <label>MVC EMG1 (RMS counts) <input id="mv1" type="number" min="0" value="0"></label>
+  <label>MVC EMG2 <input id="mv2" type="number" min="0" value="0"></label>
+  <span class="lg">0 = show raw counts; otherwise %MVC</span>
+ </div>
+ <div class="c"><h3>Zoom (applies to the three time charts)</h3>
+  <label>From <input id="z0" type="range" min="0" max="99" value="0"></label><label>To <input id="z1" type="range" min="1" max="100" value="100"></label>
+  <button id="zr" class="o">Reset</button><span class="lg" id="zl"></span></div>
+ <div class="c"><h3>Raw EMG (high-passed)</h3><canvas id="a1"></canvas></div>
+ <div class="c"><h3 id="hR">EMG RMS envelope</h3><canvas id="a2"></canvas></div>
+ <div class="c"><h3>Gyro with detected strokes</h3><canvas id="a3"></canvas></div>
+ <div class="c"><h3>Stroke cycle time (s) per stroke</h3><canvas id="a4"></canvas></div>
+ <div class="c"><h3>Fatigue: RMS per second with trend line</h3><canvas id="a5"></canvas></div>
+ <div class="c"><h3>Fatigue: median frequency (Hz) per second</h3><canvas id="a6"></canvas><div class="lg">Falling slope = fatigue. Stock AD8232 low-pass (~40 Hz) distorts this; treat as unreliable unless the capacitors were removed.</div></div>
+ <div class="c"><h3>Average spectrum</h3><canvas id="a7"></canvas></div>
+ <div class="c"><button id="ex" disabled>Export raw CSV</button><button id="ex2" disabled>Export strokes CSV</button></div>
+</div>
+
+<script>
+const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e',RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e',TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const $=id=>document.getElementById(id),dec=new TextDecoder(),COL=['#e0457b','#2a9d5c','#d98c00','#7a5cff'];
+let rx,tx,dev,xfer=null,paused=false,recStart=0,A=null,live=[[],[],[]],busyFile=false;
+const log=t=>$('st').textContent=t;
+document.querySelectorAll('.tb').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tb').forEach(x=>x.classList.add('o'));b.classList.remove('o');
+ document.querySelectorAll('.tab').forEach(t=>t.classList.remove('v'));$(b.dataset.t).classList.add('v');redrawAll()});
+
+/* ---------- generic chart ---------- */
+function chart(id,o){const c=$(id);c._o=o;paint(c);
+ c.onmousemove=e=>paint(c,e.offsetX);c.onmouseleave=()=>paint(c);
+ c.ontouchmove=e=>{const r=c.getBoundingClientRect();paint(c,e.touches[0].clientX-r.left)}}
+function paint(c,hx){const o=c._o;if(!o)return;const d=devicePixelRatio||1,W=c.clientWidth,H=c.clientHeight;if(!W)return;
+ c.width=W*d;c.height=H*d;const g=c.getContext('2d');g.scale(d,d);
+ const cs=getComputedStyle(document.documentElement),fg=cs.getPropertyValue('--mu'),bd=cs.getPropertyValue('--bd');
+ const L=46,R=8,T=18,B=20,pw=W-L-R,ph=H-T-B,S=o.series;
+ const xmin=o.xmin!=null?o.xmin:Math.min(...S.map(s=>s.x0)),xmax=o.xmax!=null?o.xmax:Math.max(...S.map(s=>s.x0+s.dx*(s.y.length-1)));
+ let ymin=Infinity,ymax=-Infinity;
+ const rg=S.map(s=>{const a=Math.max(0,Math.floor((xmin-s.x0)/s.dx)),b=Math.min(s.y.length-1,Math.ceil((xmax-s.x0)/s.dx));
+  for(let i=a;i<=b;i++){const v=s.y[i];if(v<ymin)ymin=v;if(v>ymax)ymax=v}return[a,b]});
+ if(!isFinite(ymin)){ymin=0;ymax=1}if(o.ymin!=null)ymin=o.ymin;if(ymax<=ymin)ymax=ymin+1;
+ const p=(ymax-ymin)*.06;if(o.ymin==null)ymin-=p;ymax+=p;
+ const X=x=>L+(x-xmin)/((xmax-xmin)||1)*pw,Y=v=>T+ph-(v-ymin)/(ymax-ymin)*ph;
+ g.font='11px system-ui';g.fillStyle=fg;g.strokeStyle=bd;g.lineWidth=1;
+ for(let i=0;i<=4;i++){const v=ymin+(ymax-ymin)*i/4,y=Y(v);g.beginPath();g.moveTo(L,y);g.lineTo(W-R,y);g.stroke();g.fillText(Math.abs(v)>=100?v.toFixed(0):v.toFixed(1),2,y+4)}
+ for(let i=0;i<=4;i++){const v=xmin+(xmax-xmin)*i/4;g.fillText(v.toFixed(v>=100?0:1),X(v)-8,H-5)}
+ S.forEach((s,k)=>{const[a,b]=rg[k],n=b-a+1;if(n<2)return;g.strokeStyle=s.color||COL[k];g.lineWidth=s.w||1;g.beginPath();
+  if(n<=pw*2){for(let i=a;i<=b;i++){const x=X(s.x0+i*s.dx),y=Y(s.y[i]);i==a?g.moveTo(x,y):g.lineTo(x,y)}}
+  else{for(let px=0;px<pw;px++){const i0=a+Math.floor(px/pw*n),i1=Math.min(b,a+Math.floor((px+1)/pw*n));let lo=1e99,hi=-1e99;
+   for(let i=i0;i<=i1;i++){const v=s.y[i];if(v<lo)lo=v;if(v>hi)hi=v}g.moveTo(L+px,Y(lo));g.lineTo(L+px,Y(hi))}}
+  g.stroke()});
+ (o.marks||[]).forEach(m=>{if(m.x<xmin||m.x>xmax)return;g.fillStyle='#fff';g.strokeStyle=m.color||'#000';g.lineWidth=2;g.beginPath();g.arc(X(m.x),Y(m.y),4,0,7);g.fill();g.stroke()});
+ let lx=L+4;S.forEach((s,k)=>{if(!s.name)return;g.fillStyle=s.color||COL[k];g.fillRect(lx,4,10,4);g.fillStyle=fg;g.fillText(s.name,lx+13,10);lx+=g.measureText(s.name).width+30});
+ if(hx!=null&&hx>=L&&hx<=W-R){const x=xmin+(hx-L)/pw*(xmax-xmin);g.strokeStyle=fg;g.beginPath();g.moveTo(hx,T);g.lineTo(hx,T+ph);g.stroke();
+  let t=(o.xl||'')+x.toFixed(2);S.forEach(s=>{const i=Math.round((x-s.x0)/s.dx);if(i>=0&&i<s.y.length)t+='  '+(s.name||'')+' '+s.y[i].toFixed(1)});
+  g.fillStyle=fg;g.textAlign='right';g.fillText(t,W-R,10);g.textAlign='left'}}
+
+/* ---------- BLE ---------- */
+async function send(s){await rx.writeValueWithResponse(new TextEncoder().encode(s))}
+$('bc').onclick=async()=>{try{
+ dev=await navigator.bluetooth.requestDevice({filters:[{services:[SVC]}]});
+ const srv=await dev.gatt.connect(),svc=await srv.getPrimaryService(SVC);
+ rx=await svc.getCharacteristic(RX);tx=await svc.getCharacteristic(TX);
+ await tx.startNotifications();tx.addEventListener('characteristicvaluechanged',onN);
+ dev.addEventListener('gattserverdisconnected',()=>{log('Disconnected');['bs','bt','bl'].forEach(i=>$(i).disabled=true)});
+ ['bs','bt','bl'].forEach(i=>$(i).disabled=false);log('Connected to '+dev.name);
+ await send('T '+Math.floor(Date.now()/1000));await send('?');
+}catch(e){log('Error: '+e.message)}};
+setInterval(()=>{if(dev&&dev.gatt.connected&&!xfer&&!busyFile)send('?').catch(()=>{})},5000);
+$('bs').onclick=()=>send('SS');$('bt').onclick=()=>send('ST');
+$('bl').onclick=()=>{$('fl').innerHTML='';send('LS')};
+$('bp').onclick=()=>{paused=!paused;$('bp').textContent=paused?'Resume view':'Pause view'};
+function pushL(i,x){live[i].push(x);const m=+$('lw').value;while(live[i].length>m)live[i].shift()}
+const rms=a=>{if(!a.length)return 0;const m=a.reduce((s,v)=>s+v,0)/a.length;return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length)};
+function onN(e){
+ const d=new Uint8Array(e.target.value.buffer,e.target.value.byteOffset,e.target.value.byteLength);
+ if(xfer&&xfer.got<xfer.size){xfer.buf.set(d.subarray(0,xfer.size-xfer.got),xfer.got);xfer.got+=d.length;
+  $('pg').style.width=(100*xfer.got/xfer.size)+'%';log('Downloading '+xfer.name+' '+Math.round(100*xfer.got/xfer.size)+'%');return}
+ const t=dec.decode(d);
+ if(t.startsWith('L,')){const v=t.split(',').slice(1).map(Number);pushL(0,v[0]);pushL(1,v[1]);pushL(2,Math.hypot(v[2],v[3],v[4])*.07);
+  if(!paused){liveDraw()}return}
+ if(t.startsWith('FILE ')){xfer.size=+t.slice(5);xfer.buf=new Uint8Array(xfer.size);xfer.got=0;return}
+ if(t==='END'){if(xfer){const b=xfer.buf;xfer=null;busyFile=false;$('pg').style.width='0';if(b&&b.length>16){document.querySelector('[data-t=t3]').click();analyse(b)}else log('Empty file')}return}
+ if(t.startsWith('F ')){const[,n,s]=t.split(' ');const r=$('fl').insertRow();
+  r.innerHTML=`<td>${n}</td><td>${(s/1024).toFixed(0)} kB (~${(s/4600).toFixed(0)} s)</td><td><button>Download + analyse</button><button class="o">Delete</button></td>`;
+  const b=r.querySelectorAll('button');b[0].onclick=()=>{busyFile=true;xfer={name:n,size:0,got:0,buf:null};send('GET '+n)};
+  b[1].onclick=()=>{if(confirm('Delete '+n+'?')){send('DEL '+n);r.remove()}};return}
+ if(t.startsWith('OK rec')){recStart=Date.now();live=[[],[],[]]}
+ if(t.startsWith('OK stopped'))recStart=0;
+ if(t.startsWith('STAT')){const rec=/rec=(\d)/.exec(t),bat=/bat=(\d+)/.exec(t),dr=/drop=(\d+)/.exec(t);
+  if(rec){$('kRec').textContent=rec[1]=='1'?'● REC':'idle';if(rec[1]=='1'&&!recStart)recStart=Date.now()}
+  if(bat){const v=bat[1]/1000;$('kBat').textContent=v.toFixed(2)+' V';}if(dr)$('kDr').textContent=dr[1];return}
+ log(t);if(t.startsWith('OK')||t.startsWith('ERR'))send('?').catch(()=>{});
+}
+function liveDraw(){
+ const dx=.05,w=[1,1,1].map((_,i)=>live[i]);
+ [['l1',0],['l2',1],['l3',2]].forEach(([id,i])=>chart(id,{series:[{y:w[i],x0:-w[i].length*dx,dx,color:COL[i]}],xmin:-(+$('lw').value)*dx,xmax:0,xl:'t='}));
+ $('kR1').textContent=rms(live[0].slice(-20)).toFixed(1);$('kR2').textContent=rms(live[1].slice(-20)).toFixed(1);
+ $('kGy').textContent=(live[2].at(-1)||0).toFixed(0)}
+setInterval(()=>{if(recStart){const s=Math.floor((Date.now()-recStart)/1000);$('kEl').textContent=Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}},500);
+
+/* ---------- parse + analysis ---------- */
+function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j&b;b>>=1)j^=b;j^=b;if(i<j){[re[i],re[j]]=[re[j],re[i]];[im[i],im[j]]=[im[j],im[i]]}}
+ for(let len=2;len<=n;len<<=1){const a=-2*Math.PI/len,wr=Math.cos(a),wi=Math.sin(a);for(let i=0;i<n;i+=len){let cr=1,ci=0;
+  for(let j=0;j<len/2;j++){const u=i+j,v=u+len/2,tr=re[v]*cr-im[v]*ci,ti=re[v]*ci+im[v]*cr;re[v]=re[u]-tr;im[v]=im[u]-ti;re[u]+=tr;im[u]+=ti;[cr,ci]=[cr*wr-ci*wi,cr*wi+ci*wr]}}}}
+function parse(b){
+ const dv=new DataView(b.buffer,b.byteOffset,b.byteLength);
+ if(String.fromCharCode(...b.slice(0,4))!=='SYC1'){log('Not a SYC1 file');return null}
+ const GB=dv.getUint16(10,true),N=Math.floor((b.length-16)/GB),S=N*10;
+ const raw=[new Float32Array(S),new Float32Array(S)],f=[new Float32Array(S),new Float32Array(S)],g=new Float32Array(N);let sat=0,flat=0;
+ for(let i=0;i<N;i++){const o=16+i*GB;for(let k=0;k<10;k++)for(let c=0;c<2;c++){const v=dv.getUint16(o+k*4+c*2,true);raw[c][i*10+k]=v;if(v<=5||v>=4090)sat++}
+  g[i]=Math.hypot(dv.getInt16(o+40,true),dv.getInt16(o+42,true),dv.getInt16(o+44,true))*.07}
+ for(let c=0;c<2;c++){let y=0,px=raw[c][0];for(let i=0;i<S;i++){y=.995*(y+raw[c][i]-px);px=raw[c][i];f[c][i]=y}}
+ for(let c=0;c<2;c++){let run=0;for(let i=1;i<S;i++){if(raw[c][i]===raw[c][i-1]){if(++run===500)flat+=500;else if(run>500)flat++}else run=0}}
+ return{N,S,raw,f,g,dur:S/1000,sat,flat,start:dv.getUint32(12,true)}}
+function analyse(b){const p=parse(b);if(!p)return;A=p;recompute();$('ex').disabled=$('ex2').disabled=false;log('Analysis ready: '+p.dur.toFixed(1)+' s')}
+function recompute(){if(!A)return;const{N,S,f,g}=A,gap=+$('sGap').value/10,sens=+$('sSens').value/100,W=+$('sWin').value,burp=+$('sBur').value/100;
+ $('vGap').textContent=$('sGap').value+' ms';$('vBur').textContent=$('sBur').value+'%';
+ // strokes
+ const sm=new Float32Array(N);for(let i=0;i<N;i++){let a=0,c=0;for(let j=-5;j<=5;j++)if(g[i+j]!==undefined){a+=g[i+j];c++}sm[i]=a/c}
+ const mean=sm.reduce((a,v)=>a+v,0)/N,sd=Math.sqrt(sm.reduce((a,v)=>a+(v-mean)**2,0)/N),th=mean+sens*sd,pk=[];
+ for(let i=1;i<N-1;i++)if(sm[i]>th&&sm[i]>=sm[i-1]&&sm[i]>sm[i+1]&&(!pk.length||i-pk[pk.length-1]>=gap))pk.push(i);
+ const cyc=pk.slice(1).map((v,i)=>(v-pk[i])/100),cm=cyc.length?cyc.reduce((a,v)=>a+v,0)/cyc.length:0,csd=Math.sqrt(cyc.reduce((a,v)=>a+(v-cm)**2,0)/(cyc.length||1));
+ // RMS envelopes (sliding, 50% overlap)
+ const mv=[+$('mv1').value,+$('mv2').value],env=[],tr=[],mdf=[],spec=[],stat=[];
+ for(let c=0;c<2;c++){const r=[],hop=W/2;for(let i=0;i+W<=S;i+=hop){let q=0;for(let j=i;j<i+W;j++)q+=f[c][j]**2;r.push(Math.sqrt(q/W))}
+  const sc=mv[c]>0?100/mv[c]:1;const rr=r.map(v=>v*sc);env.push(rr);
+  const rm=rr.reduce((a,v)=>a+v,0)/rr.length,pkv=Math.max(...rr),thr=pkv*burp;let bursts=0,on=false,act=0;
+  rr.forEach(v=>{if(v>thr)act++;if(v>thr&&!on){bursts++;on=true}else if(v<thr*.7)on=false});
+  // per-second RMS + trend
+  const ps=[];for(let i=0;i+1000<=S;i+=1000){let q=0;for(let j=i;j<i+1000;j++)q+=f[c][j]**2;ps.push(Math.sqrt(q/1000)*sc)}
+  const lin=a=>{const n=a.length;let sx=0,sy=0,sxy=0,sxx=0;a.forEach((v,i)=>{sx+=i;sy+=v;sxy+=i*v;sxx+=i*i});const m=(n*sxy-sx*sy)/((n*sxx-sx*sx)||1);return{m,b:(sy-m*sx)/n}};
+  const L=lin(ps),mean2=ps.reduce((a,v)=>a+v,0)/ps.length;tr.push({ps,fit:ps.map((_,i)=>L.m*i+L.b),slope:L.m,pct:L.m/(mean2||1)*60*100});
+  // median frequency per second + average spectrum (512-pt Hann)
+  const mf=[],avg=new Float64Array(256);let cnt=0;
+  for(let s=0;s+512<=S;s+=500){const re=new Float64Array(512),im=new Float64Array(512);for(let k=0;k<512;k++)re[k]=f[c][s+k]*(.5-.5*Math.cos(2*Math.PI*k/511));fft(re,im);
+   const pw=new Float64Array(256);for(let k=0;k<256;k++){pw[k]=re[k]**2+im[k]**2;avg[k]+=pw[k]}cnt++;
+   if(s%1000===0){let tot=0;for(let k=10;k<230;k++)tot+=pw[k];let a=0,k=10;for(;k<230;k++){a+=pw[k];if(a>=tot/2)break}mf.push(k*1000/512)}}
+  const sp=Array.from(avg,v=>Math.sqrt(v/(cnt||1)));mdf.push({y:mf,lin:lin(mf)});spec.push(sp);
+  stat.push({rm,pkv,bursts,duty:100*act/rr.length,unit:mv[c]>0?'%MVC':'cnt'})}
+ const total=2*S,qual=Math.max(0,100*(1-(A.sat+A.flat)/total));
+ A.r={pk,sm,th,cyc,cm,csd,env,tr,mdf,spec,stat,W,qual};render()}
+function render(){const{pk,sm,cyc,cm,csd,env,tr,mdf,spec,stat,W,qual}=A.r,dur=A.dur,dx=W/2000;
+ const k=(a,b,c)=>`<div class="k"><b>${a}</b><span>${b}${c?' · '+c:''}</span></div>`;
+ let h=k(dur.toFixed(1)+' s','Duration',A.S+' samples')+k(pk.length,'Strokes',A.start?new Date(A.start*1000).toLocaleString():'')
+  +k(cm?(60/cm).toFixed(1):'–','Stroke rate /min')+k(cm.toFixed(2)+' s','Mean cycle','SD '+csd.toFixed(2))
+  +k(cm?(100*csd/cm).toFixed(0)+'%':'–','Cycle variability (CV)','lower = more consistent')
+  +k(qual.toFixed(0)+'%','Signal quality','not clipped/flat');
+ stat.forEach((s,c)=>{h+=k(s.rm.toFixed(1)+' '+s.unit,'EMG'+(c+1)+' mean RMS','peak '+s.pkv.toFixed(1))+k(s.bursts,'EMG'+(c+1)+' bursts','active '+s.duty.toFixed(0)+'% of time')
+  +k((tr[c].pct>=0?'+':'')+tr[c].pct.toFixed(1)+' %/min','EMG'+(c+1)+' RMS trend')+k((mdf[c].lin.m*60).toFixed(1)+' Hz/min','EMG'+(c+1)+' MDF slope','MDF '+(mdf[c].y.reduce((a,v)=>a+v,0)/(mdf[c].y.length||1)).toFixed(0)+' Hz')});
+ $('sum').innerHTML=h;
+ const zx=viewWin();$('zl').textContent=zx[0].toFixed(1)+' – '+zx[1].toFixed(1)+' s';
+ $('hR').textContent='EMG RMS envelope ('+(stat[0].unit==='%MVC'?'%MVC':'counts')+')';
+ const n=A.S;
+ chart('a1',{series:[0,1].map(c=>({y:A.f[c],x0:0,dx:.001,name:'EMG'+(c+1),color:COL[c]})),xmin:zx[0],xmax:zx[1],xl:'t='});
+ chart('a2',{series:[0,1].map(c=>({y:env[c],x0:W/2000,dx,name:'EMG'+(c+1),color:COL[c],w:1.5})),xmin:zx[0],xmax:zx[1],ymin:0,xl:'t='});
+ chart('a3',{series:[{y:sm,x0:0,dx:.01,name:'gyro |ω|',color:COL[2],w:1.5},{y:sm.map(()=>A.r.th),x0:0,dx:.01,name:'threshold',color:'#888'}],
+  marks:pk.map(i=>({x:i/100,y:sm[i],color:'#d00'})),xmin:zx[0],xmax:zx[1],xl:'t='});
+ chart('a4',{series:[{y:cyc,x0:1,dx:1,name:'cycle s',color:COL[3],w:1.5}],ymin:0,xl:'stroke #'});
+ chart('a5',{series:[0,1].flatMap(c=>[{y:tr[c].ps,x0:0,dx:1,name:'EMG'+(c+1),color:COL[c]},{y:tr[c].fit,x0:0,dx:1,name:'trend',color:COL[c],w:1}]),xl:'t='});
+ chart('a6',{series:[0,1].map(c=>({y:mdf[c].y,x0:0,dx:1,name:'EMG'+(c+1)+' MDF',color:COL[c]})),xl:'t='});
+ chart('a7',{series:[0,1].map(c=>({y:spec[c],x0:0,dx:1000/512,name:'EMG'+(c+1),color:COL[c]})),xl:'Hz='})}
+function viewWin(){let a=+$('z0').value,b=+$('z1').value;if(b<=a)b=a+1;return[A?A.dur*a/100:0,A?A.dur*b/100:1]}
+function redrawAll(){if(A&&$('t3').classList.contains('v'))render();document.querySelectorAll('canvas').forEach(c=>paint(c))}
+['sSens','sGap','sWin','sBur','mv1','mv2'].forEach(i=>$(i).oninput=recompute);
+['z0','z1'].forEach(i=>$(i).oninput=()=>A&&render());$('zr').onclick=()=>{$('z0').value=0;$('z1').value=100;A&&render()};
+addEventListener('resize',redrawAll);
+
+/* ---------- local file + demo ---------- */
+$('lf').onchange=async e=>{const f=e.target.files[0];if(f){document.querySelector('[data-t=t3]').click();analyse(new Uint8Array(await f.arrayBuffer()))}};
+$('bd').onclick=()=>{ // synthetic 60 s swim: 1.4 s cycle, EMG bursts each stroke, slowly rising amplitude and falling frequency content
+ const N=6000,b=new Uint8Array(16+N*46),dv=new DataView(b.buffer);'SYC1'.split('').forEach((ch,i)=>b[i]=ch.charCodeAt(0));
+ dv.setUint16(4,1,true);dv.setUint16(6,1000,true);dv.setUint16(8,100,true);dv.setUint16(10,46,true);dv.setUint32(12,Math.floor(Date.now()/1000),true);
+ let seed=1;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647-.5;
+ for(let i=0;i<N;i++){const o=16+i*46;for(let k=0;k<10;k++){const t=(i*10+k)/1000,ph=(t%1.4)/1.4,env=Math.max(0,Math.sin(Math.PI*ph))**2,amp=(60+t*1.2)*env+8;
+  const fr=1-t/200;dv.setUint16(o+k*4,Math.round(1500+amp*(rnd()*2*fr+Math.sin(t*2*Math.PI*60*fr)*.5)),true);
+  dv.setUint16(o+k*4+2,Math.round(1500+amp*.7*(rnd()*2*fr)),true)}
+  const t=i/100,ph=(t%1.4)/1.4,w=Math.round((120+500*Math.max(0,Math.sin(2*Math.PI*ph))**2)/.07);dv.setInt16(o+40,w,true);dv.setInt16(o+42,Math.round(w*.3),true);dv.setInt16(o+44,0,true)}
+ document.querySelector('[data-t=t3]').click();analyse(b);log('Demo data loaded (synthetic, not real swimming)')};
+
+/* ---------- export ---------- */
+const dl=(name,txt)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([txt],{type:'text/csv'}));a.download=name;a.click()};
+$('ex').onclick=()=>{const r=['t_s,emg1_raw,emg2_raw,gyro_dps'];for(let i=0;i<A.S;i++)r.push((i/1000).toFixed(3)+','+A.raw[0][i]+','+A.raw[1][i]+','+A.g[Math.floor(i/10)].toFixed(1));dl('syco_raw.csv',r.join('\n'))};
+$('ex2').onclick=()=>{const r=['stroke,time_s,cycle_s'];A.r.pk.forEach((p,i)=>r.push((i+1)+','+(p/100).toFixed(2)+','+(i?A.r.cyc[i-1].toFixed(2):'')));dl('syco_strokes.csv',r.join('\n'))};
+</script></body></html>
