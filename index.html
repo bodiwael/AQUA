@@ -114,13 +114,14 @@ function paint(c,hx){const o=c._o;if(!o)return;const d=devicePixelRatio||1,W=c.c
 /* ---------- BLE ---------- */
 async function send(s){await rx.writeValueWithResponse(new TextEncoder().encode(s))}
 $('bc').onclick=async()=>{try{
- dev=await navigator.bluetooth.requestDevice({filters:[{services:[SVC]}]});
+ dev=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'SYCO'}],optionalServices:[SVC]});
  const srv=await dev.gatt.connect(),svc=await srv.getPrimaryService(SVC);
  rx=await svc.getCharacteristic(RX);tx=await svc.getCharacteristic(TX);
  await tx.startNotifications();tx.addEventListener('characteristicvaluechanged',onN);
- dev.addEventListener('gattserverdisconnected',()=>{log('Disconnected');['bs','bt','bl'].forEach(i=>$(i).disabled=true)});
+ dev.addEventListener('gattserverdisconnected',()=>{log('Disconnected. If recording, the device keeps logging to the SD card. Reconnect and press Stop to download everything.');live=[[],[],[]];recStart=0;if(xfer){xfer.blk=null;clearTimeout(xfer.timer);log('Disconnected during download. Reconnect and it will resume.')}['bs','bt','bl'].forEach(i=>$(i).disabled=true)});
  ['bs','bt','bl'].forEach(i=>$(i).disabled=false);log('Connected to '+dev.name);
  await send('T '+Math.floor(Date.now()/1000));await send('?');
+ if(xfer){xfer.tries=0;if(xfer.size)reqBlock();else send('SZ '+xfer.name)}
 }catch(e){log('Error: '+e.message)}};
 setInterval(()=>{if(dev&&dev.gatt.connected&&!xfer&&!busyFile)send('?').catch(()=>{})},5000);
 $('bs').onclick=()=>send('SS');$('bt').onclick=()=>send('ST');
@@ -130,24 +131,50 @@ function pushL(i,x){live[i].push(x);const m=+$('lw').value;while(live[i].length>
 const rms=a=>{if(!a.length)return 0;const m=a.reduce((s,v)=>s+v,0)/a.length;return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length)};
 function onN(e){
  const d=new Uint8Array(e.target.value.buffer,e.target.value.byteOffset,e.target.value.byteLength);
- if(xfer&&xfer.got<xfer.size){xfer.buf.set(d.subarray(0,xfer.size-xfer.got),xfer.got);xfer.got+=d.length;
-  $('pg').style.width=(100*xfer.got/xfer.size)+'%';log('Downloading '+xfer.name+' '+Math.round(100*xfer.got/xfer.size)+'%');return}
+ if(xfer&&xfer.blk){
+  if(d.length<=24&&d[0]===69&&d[1]===78&&d[2]===68&&d[3]===32){ // "END off sent": block finished
+   clearTimeout(xfer.timer);
+   if(xfer.got===xfer.blkLen){xfer.buf.set(xfer.blk,xfer.off);xfer.off+=xfer.blkLen;xfer.tries=0;xfer.blk=null;reqBlock()}
+   else{log('Block at '+xfer.off+' incomplete ('+xfer.got+'/'+xfer.blkLen+' bytes), retrying with smaller packets...');retry(true)}
+   return}
+  if(d.length>xfer.maxd)xfer.maxd=d.length;
+  const n=Math.min(d.length,xfer.blkLen-xfer.got);if(n>0){xfer.blk.set(d.subarray(0,n),xfer.got);xfer.got+=n}
+  const done=xfer.off+xfer.got;$('pg').style.width=(100*done/xfer.size)+'%';log('Downloading '+xfer.name+' '+Math.round(100*done/xfer.size)+'%');return}
  const t=dec.decode(d);
  if(t.startsWith('L,')){const v=t.split(',').slice(1).map(Number);pushL(0,v[0]);pushL(1,v[1]);pushL(2,Math.hypot(v[2],v[3],v[4])*.07);
   if(!paused){liveDraw()}return}
- if(t.startsWith('FILE ')){xfer.size=+t.slice(5);xfer.buf=new Uint8Array(xfer.size);xfer.got=0;return}
- if(t==='END'){if(xfer){const b=xfer.buf;xfer=null;busyFile=false;$('pg').style.width='0';if(b&&b.length>16){document.querySelector('[data-t=t3]').click();analyse(b)}else log('Empty file')}return}
+ if(t.startsWith('FILE ')){if(xfer){xfer.size=+t.slice(5);xfer.buf=new Uint8Array(xfer.size);xfer.off=0;xfer.tries=0;reqBlock()}return}
+ if(t.startsWith('END'))return; // end of file listing
  if(t.startsWith('F ')){const[,n,s]=t.split(' ');const r=$('fl').insertRow();
   r.innerHTML=`<td>${n}</td><td>${(s/1024).toFixed(0)} kB (~${(s/4600).toFixed(0)} s)</td><td><button>Download + analyse</button><button class="o">Delete</button></td>`;
-  const b=r.querySelectorAll('button');b[0].onclick=()=>{busyFile=true;xfer={name:n,size:0,got:0,buf:null};send('GET '+n)};
+  const b=r.querySelectorAll('button');b[0].onclick=()=>startDl(n);
   b[1].onclick=()=>{if(confirm('Delete '+n+'?')){send('DEL '+n);r.remove()}};return}
  if(t.startsWith('OK rec')){recStart=Date.now();live=[[],[],[]]}
- if(t.startsWith('OK stopped'))recStart=0;
+ if(t.startsWith('OK stopped')){recStart=0;const fn=(t.split(' ')[2]||'').replace(/^\//,'');
+  if(fn){log('Stopped. Downloading full recording '+fn+' from the SD card...');startDl(fn)}else log('Stopped. Open the Files tab and press Refresh list.');return}
  if(t.startsWith('STAT')){const rec=/rec=(\d)/.exec(t),bat=/bat=(\d+)/.exec(t),dr=/drop=(\d+)/.exec(t);
   if(rec){$('kRec').textContent=rec[1]=='1'?'● REC':'idle';if(rec[1]=='1'&&!recStart)recStart=Date.now()}
   if(bat){const v=bat[1]/1000;$('kBat').textContent=v.toFixed(2)+' V';}if(dr)$('kDr').textContent=dr[1];return}
+ if(t.startsWith('ERR')&&xfer&&!xfer.blk){clearTimeout(xfer.timer);xfer=null;busyFile=false}
  log(t);if(t.startsWith('OK')||t.startsWith('ERR'))send('?').catch(()=>{});
 }
+/* ---------- verified block download (resumes after reconnect) ---------- */
+function startDl(name){if(xfer)clearTimeout(xfer.timer);name=name.replace(/^\/+/,'');xfer={name,size:0,buf:null,off:0,tries:0,blk:null,got:0,blkLen:0,timer:0,chunk:180,maxd:0};busyFile=true;
+ log('Requesting '+name+'...');xfer.timer=setTimeout(()=>retry(true),4000);send('SZ '+name).catch(()=>{})}
+function reqBlock(){const x=xfer;if(!x)return;
+ if(x.off>=x.size){finish();return}
+ x.blkLen=Math.min(3600,x.size-x.off);x.blk=new Uint8Array(x.blkLen);x.got=0;x.maxd=0;
+ clearTimeout(x.timer);x.timer=setTimeout(()=>retry(true),4000);
+ send('RD '+x.name+' '+x.off+' '+x.blkLen+' '+x.chunk).catch(()=>{})}
+function retry(count){const x=xfer;if(!x)return;clearTimeout(x.timer);
+ if(!(dev&&dev.gatt.connected)){log('Waiting for reconnection to continue the download...');return}
+ if(x.blk&&x.got<x.blkLen){ // adapt packet size: truncated packets reveal the real BLE payload size
+  if(x.maxd&&x.maxd<x.chunk)x.chunk=Math.max(20,x.maxd);else x.chunk=Math.max(20,Math.floor(x.chunk*.6))}
+ if(count&&++x.tries>12){log('Download failed after 12 retries. Move the phone closer and press Download again.');busyFile=false;xfer=null;return}
+ if(x.size)reqBlock();else{x.timer=setTimeout(()=>retry(true),4000);send('SZ '+x.name).catch(()=>{})}}
+function finish(){const x=xfer;clearTimeout(x.timer);xfer=null;busyFile=false;$('pg').style.width='0';
+ if(x.size<=16){log('File has no samples ('+x.size+' bytes). The recording never wrote data. Check the SD card and power, then record again.');return}
+ document.querySelector('[data-t=t3]').click();analyse(x.buf)}
 function liveDraw(){
  const dx=.05,w=[1,1,1].map((_,i)=>live[i]);
  [['l1',0],['l2',1],['l3',2]].forEach(([id,i])=>chart(id,{series:[{y:w[i],x0:-w[i].length*dx,dx,color:COL[i]}],xmin:-(+$('lw').value)*dx,xmax:0,xl:'t='}));
