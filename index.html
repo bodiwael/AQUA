@@ -26,6 +26,7 @@ input[type=range]{vertical-align:middle;width:130px}input[type=number]{width:80p
  <button id="bd" class="o">Load demo</button><label class="btn o" style="margin:3px">Open .syc file<input id="lf" type="file" accept=".syc" hidden></label>
  <div id="st" class="lg" style="margin-top:6px">Not connected</div>
 </div>
+<div class="c"><h3>Device log</h3><pre id="lg" class="lg" style="margin:0;white-space:pre-wrap">–</pre></div>
 <div>
  <button class="tb on" data-t="t1">Live</button><button class="tb o" data-t="t2">Files</button><button class="tb o" data-t="t3">Analysis</button>
 </div>
@@ -34,11 +35,14 @@ input[type=range]{vertical-align:middle;width:130px}input[type=number]{width:80p
  <div class="c"><div class="g">
   <div class="k"><b id="kRec">–</b><span>Recording</span></div>
   <div class="k"><b id="kEl">0:00</b><span>Elapsed</span></div>
+  <div class="k"><b id="kAge">–</b><span>Last live sample</span></div>
   <div class="k"><b id="kR1">–</b><span>EMG1 RMS (live)</span></div>
   <div class="k"><b id="kR2">–</b><span>EMG2 RMS (live)</span></div>
   <div class="k"><b id="kGy">–</b><span>Gyro °/s</span></div>
   <div class="k"><b id="kBat">–</b><span>Battery</span></div>
   <div class="k"><b id="kDr">–</b><span>Dropped groups</span></div>
+  <div class="k"><b id="kSd">–</b><span>SD card</span></div>
+  <div class="k"><b id="kGz">–</b><span>Gyro sensor</span></div>
  </div>
  <button id="bp" class="o">Pause view</button><label>Window <select id="lw"><option value="200">10 s</option><option value="600" selected>30 s</option></select></label></div>
  <div class="c"><h3>EMG 1 (counts)</h3><canvas id="l1"></canvas></div>
@@ -77,8 +81,13 @@ input[type=range]{vertical-align:middle;width:130px}input[type=number]{width:80p
 <script>
 const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e',RX='6e400002-b5a3-f393-e0a9-e50e24dcca9e',TX='6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const $=id=>document.getElementById(id),dec=new TextDecoder(),COL=['#e0457b','#2a9d5c','#d98c00','#7a5cff'];
+let drawPending=false,lastLive=0;
+function schedDraw(){if(drawPending)return;drawPending=true;setTimeout(()=>{drawPending=false;if($('t1').classList.contains('v'))liveDraw()},100)}
+setInterval(()=>{$('kAge').textContent=lastLive?((Date.now()-lastLive)/1000).toFixed(1)+' s ago':'–'},500);
+let fbList=null;
 let rx,tx,dev,xfer=null,paused=false,recStart=0,A=null,live=[[],[],[]],busyFile=false;
-const log=t=>$('st').textContent=t;
+const logLines=[];
+const log=t=>{$('st').textContent=t;if(!/^Downloading/.test(t)){logLines.push(new Date().toLocaleTimeString()+'  '+t);if(logLines.length>14)logLines.shift();const e=$('lg');if(e)e.textContent=logLines.join('\n')}};
 document.querySelectorAll('.tb').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tb').forEach(x=>x.classList.add('o'));b.classList.remove('o');
  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('v'));$(b.dataset.t).classList.add('v');redrawAll()});
 
@@ -131,45 +140,57 @@ function pushL(i,x){live[i].push(x);const m=+$('lw').value;while(live[i].length>
 const rms=a=>{if(!a.length)return 0;const m=a.reduce((s,v)=>s+v,0)/a.length;return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/a.length)};
 function onN(e){
  const d=new Uint8Array(e.target.value.buffer,e.target.value.byteOffset,e.target.value.byteLength);
+ if(xfer&&xfer.legacy&&xfer.buf&&xfer.got<xfer.size){
+  if(d.length===3&&d[0]===69&&d[1]===78&&d[2]===68){legacyEnd();return}
+  if(d.length!==180&&xfer.got+d.length<xfer.size)xfer.bad++;
+  const n=Math.min(d.length,xfer.size-xfer.got);xfer.buf.set(d.subarray(0,n),xfer.got);xfer.got+=n;
+  $('pg').style.width=(100*xfer.got/xfer.size)+'%';log('Downloading (legacy) '+xfer.name+' '+Math.round(100*xfer.got/xfer.size)+'%');return}
  if(xfer&&xfer.blk){
   if(d.length<=24&&d[0]===69&&d[1]===78&&d[2]===68&&d[3]===32){ // "END off sent": block finished
    clearTimeout(xfer.timer);
    if(xfer.got===xfer.blkLen){xfer.buf.set(xfer.blk,xfer.off);xfer.off+=xfer.blkLen;xfer.tries=0;xfer.blk=null;reqBlock()}
-   else{log('Block at '+xfer.off+' incomplete ('+xfer.got+'/'+xfer.blkLen+' bytes), retrying with smaller packets...');retry(true)}
+   else{log('Block at '+xfer.off+' incomplete ('+xfer.got+'/'+xfer.blkLen+' bytes), retrying more carefully...');retry(true)}
    return}
   if(d.length>xfer.maxd)xfer.maxd=d.length;
   const n=Math.min(d.length,xfer.blkLen-xfer.got);if(n>0){xfer.blk.set(d.subarray(0,n),xfer.got);xfer.got+=n}
   const done=xfer.off+xfer.got;$('pg').style.width=(100*done/xfer.size)+'%';log('Downloading '+xfer.name+' '+Math.round(100*done/xfer.size)+'%');return}
  const t=dec.decode(d);
  if(t.startsWith('L,')){const v=t.split(',').slice(1).map(Number);pushL(0,v[0]);pushL(1,v[1]);pushL(2,Math.hypot(v[2],v[3],v[4])*.07);
-  if(!paused){liveDraw()}return}
- if(t.startsWith('FILE ')){if(xfer){xfer.size=+t.slice(5);xfer.buf=new Uint8Array(xfer.size);xfer.off=0;xfer.tries=0;reqBlock()}return}
- if(t.startsWith('END'))return; // end of file listing
- if(t.startsWith('F ')){const[,n,s]=t.split(' ');const r=$('fl').insertRow();
+  lastLive=Date.now();if(!paused)schedDraw();return}
+ if(t.startsWith('FILE ')){if(xfer){xfer.size=+t.slice(5);xfer.buf=new Uint8Array(xfer.size);xfer.off=0;xfer.tries=0;xfer.got=0;if(!xfer.legacy)reqBlock()}return}
+ if(t.startsWith('END')){if(fbList){const l=fbList.sort();fbList=null;if(l.length)startDl(l[l.length-1],true);else log('No recording file found on the SD card. Check the SD card status above and the Device log, then record again.')}else if(xfer&&xfer.legacy)legacyEnd();return} // else end of file listing
+ if(t.startsWith('F ')){const[,n,s]=t.split(' ');if(fbList){fbList.push(n.replace(/^\/+/,''));return}const r=$('fl').insertRow();
   r.innerHTML=`<td>${n}</td><td>${(s/1024).toFixed(0)} kB (~${(s/4600).toFixed(0)} s)</td><td><button>Download + analyse</button><button class="o">Delete</button></td>`;
   const b=r.querySelectorAll('button');b[0].onclick=()=>startDl(n);
   b[1].onclick=()=>{if(confirm('Delete '+n+'?')){send('DEL '+n);r.remove()}};return}
  if(t.startsWith('OK rec')){recStart=Date.now();live=[[],[],[]]}
- if(t.startsWith('OK stopped')){recStart=0;const fn=(t.split(' ')[2]||'').replace(/^\//,'');
+ if(t.startsWith('OK stopped')){recStart=0;log('Device: '+t+'   (last number = 10 ms groups written; 0 = nothing was recorded)');const fn=(t.split(' ')[2]||'').replace(/^\//,'');
   if(fn){log('Stopped. Downloading full recording '+fn+' from the SD card...');startDl(fn)}else log('Stopped. Open the Files tab and press Refresh list.');return}
  if(t.startsWith('STAT')){const rec=/rec=(\d)/.exec(t),bat=/bat=(\d+)/.exec(t),dr=/drop=(\d+)/.exec(t);
   if(rec){$('kRec').textContent=rec[1]=='1'?'● REC':'idle';if(rec[1]=='1'&&!recStart)recStart=Date.now()}
-  if(bat){const v=bat[1]/1000;$('kBat').textContent=v.toFixed(2)+' V';}if(dr)$('kDr').textContent=dr[1];return}
+  if(bat){const v=bat[1]/1000;$('kBat').textContent=v.toFixed(2)+' V';}if(dr)$('kDr').textContent=dr[1];const sd=/sd=(\d)/.exec(t),gz=/gyro=(\d)/.exec(t);if(sd)$('kSd').textContent=sd[1]=='1'?'OK':'NOT MOUNTED';if(gz)$('kGz').textContent=gz[1]=='1'?'OK':'not found';return}
+ if(t==='ERR unknown'&&xfer&&!xfer.blk&&!xfer.size&&!xfer.legacy){clearTimeout(xfer.timer);xfer.legacy=true;xfer.got=0;xfer.bad=0;
+  log('Old firmware detected: using the slow legacy download (re-flash for reliable download)');send('GET '+xfer.name).catch(()=>{});return}
+ if(t==='ERR nofile'&&xfer&&!xfer.blk&&!xfer.fb){clearTimeout(xfer.timer);xfer=null;busyFile=false;fbList=[];log('File not found by name, looking for the newest recording...');send('LS').catch(()=>{fbList=null});return}
+ if(t.startsWith('ERR'))fbList=null;
  if(t.startsWith('ERR')&&xfer&&!xfer.blk){clearTimeout(xfer.timer);xfer=null;busyFile=false}
  log(t);if(t.startsWith('OK')||t.startsWith('ERR'))send('?').catch(()=>{});
 }
 /* ---------- verified block download (resumes after reconnect) ---------- */
-function startDl(name){if(xfer)clearTimeout(xfer.timer);name=name.replace(/^\/+/,'');xfer={name,size:0,buf:null,off:0,tries:0,blk:null,got:0,blkLen:0,timer:0,chunk:180,maxd:0};busyFile=true;
+function startDl(name,fb){if(xfer)clearTimeout(xfer.timer);name=name.replace(/^\/+/,'');xfer={name,fb:!!fb,size:0,buf:null,off:0,tries:0,blk:null,got:0,blkLen:0,timer:0,chunk:240,gap:5,maxd:0};busyFile=true;
  log('Requesting '+name+'...');xfer.timer=setTimeout(()=>retry(true),4000);send('SZ '+name).catch(()=>{})}
 function reqBlock(){const x=xfer;if(!x)return;
  if(x.off>=x.size){finish();return}
  x.blkLen=Math.min(3600,x.size-x.off);x.blk=new Uint8Array(x.blkLen);x.got=0;x.maxd=0;
  clearTimeout(x.timer);x.timer=setTimeout(()=>retry(true),4000);
- send('RD '+x.name+' '+x.off+' '+x.blkLen+' '+x.chunk).catch(()=>{})}
-function retry(count){const x=xfer;if(!x)return;clearTimeout(x.timer);
+ send('RD '+x.name+' '+x.off+' '+x.blkLen+' '+x.chunk+' '+x.gap).catch(()=>{})}
+function legacyEnd(){const x=xfer;if(!x)return;
+ if(x.got!==x.size||x.bad){log('Legacy download incomplete or corrupted ('+x.got+'/'+x.size+' bytes, '+x.bad+' short packets). The link only passes small packets and the old firmware cannot adapt. Move closer or re-flash.');clearTimeout(x.timer);xfer=null;busyFile=false;return}
+ x.off=x.size;finish()}
+function retry(count){const x=xfer;if(!x||x.legacy)return;clearTimeout(x.timer);
  if(!(dev&&dev.gatt.connected)){log('Waiting for reconnection to continue the download...');return}
  if(x.blk&&x.got<x.blkLen){ // adapt packet size: truncated packets reveal the real BLE payload size
-  if(x.maxd&&x.maxd<x.chunk)x.chunk=Math.max(20,x.maxd);else x.chunk=Math.max(20,Math.floor(x.chunk*.6))}
+  if(x.maxd&&x.maxd<x.chunk)x.chunk=Math.max(20,x.maxd);else x.gap=Math.min(40,Math.ceil(x.gap*1.8)+2)}
  if(count&&++x.tries>12){log('Download failed after 12 retries. Move the phone closer and press Download again.');busyFile=false;xfer=null;return}
  if(x.size)reqBlock();else{x.timer=setTimeout(()=>retry(true),4000);send('SZ '+x.name).catch(()=>{})}}
 function finish(){const x=xfer;clearTimeout(x.timer);xfer=null;busyFile=false;$('pg').style.width='0';
@@ -189,14 +210,15 @@ function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let b=n>>1;for(;j
 function parse(b){
  const dv=new DataView(b.buffer,b.byteOffset,b.byteLength);
  if(String.fromCharCode(...b.slice(0,4))!=='SYC1'){log('Not a SYC1 file');return null}
- const GB=dv.getUint16(10,true),N=Math.floor((b.length-16)/GB),S=N*10;
+ const GB=dv.getUint16(10,true),cp=GB<46,N=Math.floor((b.length-16)/GB),S=N*10;
  const raw=[new Float32Array(S),new Float32Array(S)],f=[new Float32Array(S),new Float32Array(S)],g=new Float32Array(N);let sat=0,flat=0;
- for(let i=0;i<N;i++){const o=16+i*GB;for(let k=0;k<10;k++)for(let c=0;c<2;c++){const v=dv.getUint16(o+k*4+c*2,true);raw[c][i*10+k]=v;if(v<=5||v>=4090)sat++}
-  g[i]=Math.hypot(dv.getInt16(o+40,true),dv.getInt16(o+42,true),dv.getInt16(o+44,true))*.07}
+ for(let i=0;i<N;i++){const o=16+i*GB,go=cp?o:o+40;
+  if(!cp)for(let k=0;k<10;k++)for(let c=0;c<2;c++){const v=dv.getUint16(o+k*4+c*2,true);raw[c][i*10+k]=v;if(v<=5||v>=4090)sat++}
+  g[i]=Math.hypot(dv.getInt16(go,true),dv.getInt16(go+2,true),dv.getInt16(go+4,true))*.07}
  for(let c=0;c<2;c++){let y=0,px=raw[c][0];for(let i=0;i<S;i++){y=.995*(y+raw[c][i]-px);px=raw[c][i];f[c][i]=y}}
- for(let c=0;c<2;c++){let run=0;for(let i=1;i<S;i++){if(raw[c][i]===raw[c][i-1]){if(++run===500)flat+=500;else if(run>500)flat++}else run=0}}
- return{N,S,raw,f,g,dur:S/1000,sat,flat,start:dv.getUint32(12,true)}}
-function analyse(b){const p=parse(b);if(!p)return;A=p;recompute();$('ex').disabled=$('ex2').disabled=false;log('Analysis ready: '+p.dur.toFixed(1)+' s')}
+ if(!cp)for(let c=0;c<2;c++){let run=0;for(let i=1;i<S;i++){if(raw[c][i]===raw[c][i-1]){if(++run===500)flat+=500;else if(run>500)flat++}else run=0}}
+ return{N,S,raw,f,g,cp,dur:S/1000,sat,flat,start:dv.getUint32(12,true)}}
+function analyse(b){const p=parse(b);if(!p)return;A=p;recompute();$('ex').disabled=$('ex2').disabled=false;log('Analysis ready: '+p.dur.toFixed(1)+' s'+(p.cp?' (gyro-only file: EMG charts are empty)':''))}
 function recompute(){if(!A)return;const{N,S,f,g}=A,gap=+$('sGap').value/10,sens=+$('sSens').value/100,W=+$('sWin').value,burp=+$('sBur').value/100;
  $('vGap').textContent=$('sGap').value+' ms';$('vBur').textContent=$('sBur').value+'%';
  // strokes
